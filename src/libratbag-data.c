@@ -371,6 +371,8 @@ init_data_steelseries(struct ratbag *ratbag,
 			data->steelseries.quirk = STEELSERIES_QUIRK_RIVAL100;
 		if (streq(quirk, "SenseiRAW"))
 			data->steelseries.quirk = STEELSERIES_QUIRK_SENSEIRAW;
+		if (streq(quirk, "Wireless"))
+			data->steelseries.quirk = STEELSERIES_QUIRK_WIRELESS;
 	}
 }
 

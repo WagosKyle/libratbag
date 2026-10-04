@@ -1,0 +1,14 @@
+[Device]
+Name=SteelSeries Aerox 5 Wireless
+# 2.4 GHz wireless mode: standard, Destiny 2 Edition, Diablo IV Edition
+DeviceMatch=usb:1038:1852;usb:1038:185c;usb:1038:1860
+DeviceType=mouse
+Driver=steelseries
+
+[Driver/steelseries]
+Buttons=9
+DeviceVersion=5
+DpiRange=100:18000@100
+Leds=3
+MacroLength=1
+Quirk=Wireless

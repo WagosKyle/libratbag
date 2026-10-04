@@ -1,0 +1,13 @@
+[Device]
+Name=SteelSeries Aerox 5 Wireless
+# Wired mode: standard, Destiny 2 Edition, Diablo IV Edition
+DeviceMatch=usb:1038:1854;usb:1038:185e;usb:1038:1862
+DeviceType=mouse
+Driver=steelseries
+
+[Driver/steelseries]
+Buttons=9
+DeviceVersion=5
+DpiRange=100:18000@100
+Leds=3
+MacroLength=1

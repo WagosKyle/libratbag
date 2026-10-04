@@ -256,7 +256,7 @@ def check_section_steelseries(section: configparser.SectionProxy):
         pass
 
     try:
-        quirks = ("Rival100", "SenseiRAW")
+        quirks = ("Rival100", "SenseiRAW", "Wireless")
         assert section["Quirk"] in quirks
     except KeyError:
         # No such section - not an error.

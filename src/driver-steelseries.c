@@ -37,6 +37,7 @@
 
 #define STEELSERIES_NUM_PROFILES	1
 #define STEELSERIES_NUM_DPI		2
+#define STEELSERIES_NUM_DPI_PROTOCOL5	5
 #define STEELSERIES_INPUT_ENDPOINT	0
 #define STEELSERIES_INPUT_HIDRAW	1
 
@@ -75,6 +76,17 @@
 
 #define STEELSERIES_ID_DPI_PROTOCOL4		0x15
 #define STEELSERIES_ID_REPORT_RATE_PROTOCOL4	0x17
+
+#define STEELSERIES_ID_SAVE_PROTOCOL5		0x11
+#define STEELSERIES_ID_LED_PROTOCOL5		0x21
+#define STEELSERIES_ID_BUTTONS_PROTOCOL5	0x2a
+#define STEELSERIES_ID_REPORT_RATE_PROTOCOL5	0x2b
+#define STEELSERIES_ID_DPI_PROTOCOL5		0x2d
+
+/* Protocol 5 devices connected through the 2.4 GHz dongle expect bit 6 to be
+ * set in the command id. */
+#define STEELSERIES_WIRELESS_FLAG		0x40
+#define STEELSERIES_USAGE_PAGE_PROTOCOL5	0xffc0
 
 #define STEELSERIES_BUTTON_OFF			0x00
 #define STEELSERIES_BUTTON_RES_CYCLE		0x30
@@ -124,10 +136,44 @@ union steelseries_message {
 _Static_assert(sizeof(union steelseries_message) == STEELSERIES_REPORT_SIZE,
 	       "Size of union steelseries_message is wrong");
 
+/* Protocol 5 (TrueMove Air sensor) DPI values, from 100 to 18000 in steps of
+ * 100. The mapping is not linear. Values taken from rivalcfg. */
+static const uint8_t steelseries_dpi_protocol5[] = {
+	0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+	0x0e, 0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+	0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x23, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a,
+	0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x32, 0x33, 0x34, 0x35, 0x36, 0x38, 0x39,
+	0x3a, 0x3b, 0x3c, 0x3e, 0x3f, 0x40, 0x41, 0x42, 0x44, 0x45, 0x46, 0x47,
+	0x48, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x50, 0x51, 0x52, 0x53, 0x54, 0x56,
+	0x57, 0x58, 0x59, 0x5a, 0x5c, 0x5d, 0x5e, 0x5f, 0x60, 0x62, 0x63, 0x64,
+	0x65, 0x66, 0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6e, 0x6f, 0x70, 0x71, 0x72,
+	0x74, 0x75, 0x76, 0x77, 0x78, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x80, 0x81,
+	0x82, 0x83, 0x84, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8c, 0x8d, 0x8e, 0x8f,
+	0x90, 0x92, 0x93, 0x94, 0x95, 0x96, 0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9e,
+	0x9f, 0xa0, 0xa1, 0xa2, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xaa, 0xab, 0xac,
+	0xad, 0xae, 0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9,
+	0xba, 0xbb, 0xbc, 0xbd, 0xbf, 0xc0, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7,
+	0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xcf, 0xd0, 0xd1, 0xd2, 0xd3, 0xd5, 0xd6,
+};
+
+static uint8_t
+steelseries_command_id(struct ratbag_device *device, uint8_t id)
+{
+	if (ratbag_device_data_steelseries_get_quirk(device->data) == STEELSERIES_QUIRK_WIRELESS)
+		return id | STEELSERIES_WIRELESS_FLAG;
+
+	return id;
+}
+
 static int
 steelseries_test_hidraw(struct ratbag_device *device)
 {
 	int device_version = ratbag_device_data_steelseries_get_device_version(device->data);
+
+	/* Protocol 5 devices expose two vendor interfaces, only the one with
+	 * the output report accepts commands. */
+	if (device_version == 5)
+		return ratbag_hidraw_get_usage_page(device, 0) == STEELSERIES_USAGE_PAGE_PROTOCOL5;
 
 	/* Rival mice are composite devices with multiple HID devices
 	 * and only the HID vendor device can be used to configure the
@@ -146,6 +192,22 @@ steelseries_test_hidraw(struct ratbag_device *device)
 		return ratbag_hidraw_has_report(device, STEELSERIES_REPORT_ID_1);
 
 	return true;
+}
+
+static void
+button_defaults_protocol5(struct ratbag_button *button)
+{
+	struct ratbag_button_action action = BUTTON_ACTION_NONE;
+
+	if (button->index < 5) {
+		action.type = RATBAG_BUTTON_ACTION_TYPE_BUTTON;
+		action.action.button = button->index + 1;
+	} else if (button->index == 5) {
+		action.type = RATBAG_BUTTON_ACTION_TYPE_SPECIAL;
+		action.action.special = RATBAG_BUTTON_ACTION_SPECIAL_RESOLUTION_CYCLE_UP;
+	}
+
+	ratbag_button_set_action(button, &action);
 }
 
 static void
@@ -307,20 +369,34 @@ steelseries_probe(struct ratbag_device *device)
 
 	static const unsigned int report_rates[] = { 125, 250, 500, 1000 };
 
-	rc = ratbag_find_hidraw(device, steelseries_test_hidraw);
-	if (rc)
-		return rc;
-
-	rc = ratbag_open_hidraw_index(device,
-				      STEELSERIES_INPUT_ENDPOINT,
-				      STEELSERIES_INPUT_HIDRAW);
-	if (rc)
-		return rc;
-
 	device_version = ratbag_device_data_steelseries_get_device_version(device->data);
 	if (device_version == -1) {
 		log_error(device->ratbag, "Device version not set\n");
 		return -EINVAL;
+	}
+
+	if (device_version == 5) {
+		/* Only bind to the command interface itself, otherwise every
+		 * hidraw node of the device shows up as a separate device.
+		 * Protocol 5 doesn't read from the input endpoint. */
+		rc = ratbag_open_hidraw(device);
+		if (rc)
+			return rc;
+
+		if (!steelseries_test_hidraw(device)) {
+			ratbag_close_hidraw(device);
+			return -ENODEV;
+		}
+	} else {
+		rc = ratbag_find_hidraw(device, steelseries_test_hidraw);
+		if (rc)
+			return rc;
+
+		rc = ratbag_open_hidraw_index(device,
+					      STEELSERIES_INPUT_ENDPOINT,
+					      STEELSERIES_INPUT_HIDRAW);
+		if (rc)
+			return rc;
 	}
 
 	rc = ratbag_device_data_steelseries_get_button_count(device->data);
@@ -339,7 +415,7 @@ steelseries_probe(struct ratbag_device *device)
 
 	ratbag_device_init_profiles(device,
 				    STEELSERIES_NUM_PROFILES,
-				    STEELSERIES_NUM_DPI,
+				    device_version == 5 ? STEELSERIES_NUM_DPI_PROTOCOL5 : STEELSERIES_NUM_DPI,
 				    button_count,
 				    led_count);
 
@@ -382,7 +458,10 @@ steelseries_probe(struct ratbag_device *device)
 				ratbag_button_enable_action_type(button, RATBAG_BUTTON_ACTION_TYPE_MACRO);
 			}
 
-			button_defaults_for_layout(button, button_count);
+			if (device_version == 5)
+				button_defaults_protocol5(button);
+			else
+				button_defaults_for_layout(button, button_count);
 		}
 
 		ratbag_profile_for_each_led(profile, led) {
@@ -398,6 +477,8 @@ steelseries_probe(struct ratbag_device *device)
 			}
 			ratbag_led_set_mode_capability(led, RATBAG_LED_OFF);
 			ratbag_led_set_mode_capability(led, RATBAG_LED_ON);
+			if (device_version == 5)
+				continue;
 			ratbag_led_set_mode_capability(led, RATBAG_LED_BREATHING);
 			if (device_version >= 2)
 				ratbag_led_set_mode_capability(led, RATBAG_LED_CYCLE);
@@ -482,6 +563,25 @@ steelseries_write_dpi(struct ratbag_resolution *resolution)
 		msg.msg.parameters[1] = (uint8_t)resolution->index + 1;
 		msg.msg.parameters[2] = (uint8_t)(resolution->dpi_x / (size_t)dpirange->step - 1);
 		break;
+	case 5: {
+		/* All presets are written at once, along with the active one */
+		struct ratbag_resolution *res;
+		uint8_t count = 0;
+
+		buf_len = STEELSERIES_REPORT_SIZE;
+		msg.msg.parameters[0] = steelseries_command_id(device, STEELSERIES_ID_DPI_PROTOCOL5);
+		ratbag_profile_for_each_resolution(resolution->profile, res) {
+			size_t i = res->dpi_x / 100;
+
+			i = i == 0 ? 0 : min(i - 1, ARRAY_LENGTH(steelseries_dpi_protocol5) - 1);
+			if (res->is_active)
+				msg.msg.parameters[2] = count;
+			msg.msg.parameters[3 + count] = steelseries_dpi_protocol5[i];
+			count++;
+		}
+		msg.msg.parameters[1] = count;
+		break;
+	}
 	default:
 		return -ENOTSUP;
 	}
@@ -539,6 +639,25 @@ steelseries_write_report_rate(struct ratbag_profile *profile)
 		msg.msg.parameters[0] = STEELSERIES_ID_REPORT_RATE_PROTOCOL3;
 		msg.msg.parameters[2] = (uint8_t)1000 / profile->hz;
 		break;
+	case 5:
+		if (profile->hz >= 1000) {
+			profile->hz = 1000;
+			reported_rate = 0x00;
+		} else if (profile->hz >= 375) {
+			profile->hz = 500;
+			reported_rate = 0x01;
+		} else if (profile->hz <= 125) {
+			profile->hz = 125;
+			reported_rate = 0x03;
+		} else {
+			profile->hz = 250;
+			reported_rate = 0x02;
+		}
+
+		buf_len = STEELSERIES_REPORT_SIZE;
+		msg.msg.parameters[0] = steelseries_command_id(device, STEELSERIES_ID_REPORT_RATE_PROTOCOL5);
+		msg.msg.parameters[1] = reported_rate;
+		break;
 	default:
 		return -ENOTSUP;
 	}
@@ -564,23 +683,30 @@ steelseries_write_buttons(struct ratbag_profile *profile)
 
 	const bool is_senseiraw = ratbag_device_data_steelseries_get_quirk(device->data) == STEELSERIES_QUIRK_SENSEIRAW;
 	const size_t button_size = is_senseiraw ? 3 : 5;
-	const size_t report_size = is_senseiraw ? STEELSERIES_REPORT_SIZE_SHORT : STEELSERIES_REPORT_LONG_SIZE;
+	size_t report_size = is_senseiraw ? STEELSERIES_REPORT_SIZE_SHORT : STEELSERIES_REPORT_LONG_SIZE;
 	const int max_modifiers = is_senseiraw ? 0 : 3;
+	/* Protocol 5 has no padding byte after the command id */
+	const size_t first_idx = device_version == 5 ? 1 : 2;
 
 	union steelseries_message msg = {
 		.msg.report_id = STEELSERIES_REPORT_ID,
 		.msg.parameters = {0},
 	};
 
-	msg.msg.parameters[0] = STEELSERIES_ID_BUTTONS;
+	if (device_version == 5) {
+		report_size = STEELSERIES_REPORT_SIZE;
+		msg.msg.parameters[0] = steelseries_command_id(device, STEELSERIES_ID_BUTTONS_PROTOCOL5);
+	} else {
+		msg.msg.parameters[0] = STEELSERIES_ID_BUTTONS;
+	}
 
 	ratbag_profile_for_each_button(profile, button) {
 		struct ratbag_button_action *action = &button->action;
 		unsigned int key;
 		unsigned int modifiers;
 
-		/* Each button takes up 3 or 5 bytes starting from index 2 */
-		size_t idx = 2 + button->index * button_size;
+		/* Each button takes up 3 or 5 bytes starting from index 1 or 2 */
+		size_t idx = first_idx + button->index * button_size;
 
 		switch (action->type) {
 		case RATBAG_BUTTON_ACTION_TYPE_BUTTON:
@@ -654,6 +780,14 @@ steelseries_write_buttons(struct ratbag_profile *profile)
 			msg.msg.parameters[idx] = STEELSERIES_BUTTON_OFF;
 			break;
 		}
+	}
+
+	/* Protocol 5 also expects the wheel to be mapped after the buttons */
+	if (device_version == 5) {
+		size_t idx = first_idx + profile->device->num_buttons * button_size;
+
+		msg.msg.parameters[idx] = STEELSERIES_BUTTON_WHEEL_UP;
+		msg.msg.parameters[idx + button_size] = STEELSERIES_BUTTON_WHEEL_DOWN;
 	}
 
 	msleep(10);
@@ -945,6 +1079,41 @@ steelseries_write_led_v3(struct ratbag_led *led)
 }
 
 static int
+steelseries_write_led_v5(struct ratbag_led *led)
+{
+	struct ratbag_device *device = led->profile->device;
+	int ret;
+
+	union steelseries_message msg = {
+		.msg.report_id = STEELSERIES_REPORT_ID,
+		.msg.parameters = {0},
+	};
+
+	msg.msg.parameters[0] = steelseries_command_id(device, STEELSERIES_ID_LED_PROTOCOL5);
+	msg.msg.parameters[1] = 0x01;
+	msg.msg.parameters[2] = (uint8_t)led->index;
+
+	switch (led->mode) {
+	case RATBAG_LED_OFF:
+		break;
+	case RATBAG_LED_ON:
+		msg.msg.parameters[3] = led->color.red;
+		msg.msg.parameters[4] = led->color.green;
+		msg.msg.parameters[5] = led->color.blue;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	msleep(10);
+	ret = ratbag_hidraw_output_report(device, msg.data, STEELSERIES_REPORT_SIZE);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
+static int
 steelseries_write_led(struct ratbag_led *led)
 {
 	struct ratbag_device *device = led->profile->device;
@@ -956,6 +1125,8 @@ steelseries_write_led(struct ratbag_led *led)
 		return steelseries_write_led_v2(led);
 	if (device_version == 3)
 		return steelseries_write_led_v3(led);
+	if (device_version == 5)
+		return steelseries_write_led_v5(led);
 
 	return -ENOTSUP;
 }
@@ -981,6 +1152,9 @@ steelseries_write_save(struct ratbag_device *device)
 	} else if (device_version == 3 || device_version == 4) {
 		buf_len = STEELSERIES_REPORT_SIZE;
 		msg.msg.parameters[0] = STEELSERIES_ID_SAVE_PROTOCOL3;
+	} else if (device_version == 5) {
+		buf_len = STEELSERIES_REPORT_SIZE;
+		msg.msg.parameters[0] = steelseries_command_id(device, STEELSERIES_ID_SAVE_PROTOCOL5);
 	} else {
 		return -ENOTSUP;
 	}
